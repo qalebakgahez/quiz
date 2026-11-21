@@ -7,6 +7,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <style>
   :root { --green:#0b5830; --green2:#107c41; --bg:#f6fbf8; --cream:#f5f0e1; --red:#c81e1e; --ink:#1c2b23; }
   * { box-sizing:border-box; margin:0; padding:0; }
@@ -69,6 +70,14 @@
     <div class="err" id="authErr"></div>
   </div>
 
+  <div class="card" id="ownerExport" style="display:none;">
+    <h3 style="color:var(--green)">ردود الاستبيان 📊</h3>
+    <p class="muted">تحميل ردود الاستبيان والمشتركين في ملف Excel — متاح لحساب المالكة فقط.</p>
+    <button class="btn" onclick="exportSurvey()">⬇️ تحميل الاستبيان (Excel)</button>
+    <div class="muted" id="expMsg" style="margin-top:8px;color:var(--green);font-weight:bold;"></div>
+    <div class="err" id="expErr"></div>
+  </div>
+
   <div class="card" id="builder" style="display:none;">
     <h3 style="color:var(--green)">إنشاء اختبار جديد</h3>
     <label>عنوان الاختبار</label>
@@ -117,7 +126,47 @@
 const SUPA_URL = 'https://vgvkbsnpdpgybtsfwted.supabase.co';
 const SUPA_KEY = 'sb_publishable_v3QgxU-WmX2vOPmIr1vJZw_qaGTHVvg';
 const GENQ_URL = SUPA_URL + '/functions/v1/genq';
+const OWNER_UID = 'd135bdc1-b4a6-4050-8a75-a11eef59c073';
 const supa = supabase.createClient(SUPA_URL, SUPA_KEY);
+
+const safeCell = v => (typeof v === 'string' && v.length && '=+-@\t\r'.includes(v.charAt(0))) ? '\u200B' + v : v;
+async function exportSurvey() {
+  const err = document.getElementById('expErr'); err.style.display = 'none';
+  const msg = document.getElementById('expMsg');
+  msg.textContent = '⏳ بنجهز الملف...';
+  try {
+    const fb = await supa.from('feedback').select('*').order('created_at', { ascending: false });
+    if (fb.error) throw new Error(fb.error.message);
+    const sub = await supa.from('subscribers').select('*').order('created_at', { ascending: false });
+    if (sub.error) throw new Error(sub.error.message);
+    const yesNo = v => v === true ? 'نعم' : v === false ? 'لا' : '';
+    const dt = v => v ? new Date(v).toLocaleString('ar-EG') : '';
+    const fbRows = (fb.data || []).map(r => ({
+      'التقييم': r.rating != null ? r.rating : '',
+      'اللي عجبك': safeCell(r.liked || ''),
+      'اقتراحات التحسين': safeCell(r.improve || ''),
+      'الإيميل': safeCell(r.email || ''),
+      'الموبايل': safeCell(r.phone || ''),
+      'موافق على التواصل': yesNo(r.consent_reply),
+      'مشترك في الأخبار': yesNo(r.consent_news),
+      'التاريخ': dt(r.created_at)
+    }));
+    const subRows = (sub.data || []).map(r => ({ 'الإيميل': safeCell(r.email || ''), 'التاريخ': dt(r.created_at) }));
+    const wb = XLSX.utils.book_new();
+    wb.Workbook = { Views: [{ RTL: true }] };
+    const ws1 = XLSX.utils.json_to_sheet(fbRows.length ? fbRows : [{ 'التقييم': 'لا توجد ردود بعد' }]);
+    ws1['!cols'] = [{ wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 28 }, { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 22 }];
+    XLSX.utils.book_append_sheet(wb, ws1, 'ردود الاستبيان');
+    const ws2 = XLSX.utils.json_to_sheet(subRows.length ? subRows : [{ 'الإيميل': 'لا يوجد مشتركون بعد' }]);
+    ws2['!cols'] = [{ wch: 28 }, { wch: 22 }];
+    XLSX.utils.book_append_sheet(wb, ws2, 'المشتركون');
+    XLSX.writeFile(wb, 'استبيان-تحدي-كويزورا.xlsx');
+    msg.textContent = '✅ نزّل الملف — ' + fbRows.length + ' رد و' + subRows.length + ' مشترك';
+  } catch (e) {
+    msg.textContent = '';
+    showErr('expErr', 'تعذر التحميل: ' + e.message);
+  }
+}
 let mode = 'login', user = null, qCount = 0, buildMode = 'file', fileText = '';
 
 if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -156,6 +205,7 @@ function enter(u) {
   document.getElementById('builder').style.display = '';
   document.getElementById('dash').style.display = '';
   document.getElementById('signoutBox').style.display = '';
+  if (u.id === OWNER_UID) document.getElementById('ownerExport').style.display = '';
   setBuild('file');
   loadDashboard();
 }
