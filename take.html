@@ -50,6 +50,21 @@
   .muted { color:#8a9a90; font-size:13px; text-align:center; margin-top:16px; }
   .err { background:#fbeaea; color:var(--red); border-radius:10px; padding:12px; margin-top:14px; font-size:14px; display:none; }
   footer { text-align:center; color:#8a9a90; font-size:13px; margin-top:30px; padding-bottom:20px; }
+  .mrow { display:flex; gap:8px; align-items:center; margin-top:10px; }
+  .mrow .ml { flex:1.2; background:var(--bg); border:2px solid #dce9e0; border-radius:12px; padding:12px 14px; font-size:15px; line-height:1.5; }
+  .mrow select { flex:1; padding:12px 10px; border:2px solid #dce9e0; border-radius:12px; font-size:15px; font-family:inherit; background:#fff; }
+  .mrow.good .ml { border-color:var(--green2); background:#e6f6ec; }
+  .mrow.bad .ml { border-color:var(--red); background:#fbeaea; }
+  .orow { display:flex; gap:8px; align-items:center; margin-top:10px; background:var(--bg); border:2px solid #dce9e0; border-radius:12px; padding:10px 12px; }
+  .orow .ot { flex:1; font-size:15px; line-height:1.5; }
+  .orow .obtns { display:flex; flex-direction:column; gap:2px; }
+  .orow .obtns button { border:1px solid #dce9e0; background:#fff; border-radius:8px; width:34px; height:22px; cursor:pointer; font-size:12px; color:var(--green); line-height:1; }
+  .orow.good { border-color:var(--green2); background:#e6f6ec; }
+  .orow.bad { border-color:var(--red); background:#fbeaea; }
+  .fillin { width:100%; margin-top:14px; padding:14px 16px; border:2px solid #dce9e0; border-radius:12px; font-size:16px; font-family:inherit; background:var(--bg); }
+  .fillin.good { border-color:var(--green2); background:#e6f6ec; }
+  .fillin.bad { border-color:var(--red); background:#fbeaea; }
+  .confirm { width:100%; margin-top:14px; background:var(--green2); color:#fff; border:0; border-radius:12px; padding:13px; font-size:16px; font-weight:bold; cursor:pointer; font-family:inherit; }
 </style>
 </head>
 <body>
@@ -158,6 +173,16 @@ async function load() {
   document.title = quiz.title + ' — تحدي';
   const rs = await supa.from('questions').select('*').eq('quiz_id', quizId).order('ord');
   qs = shuffle(rs.data || []).map(q => {
+    const type = q.type || 'mcq';
+    if (type === 'match') {
+      const rights = (q.right_items || []).map((t, idx) => ({ t, idx }));
+      return { ...q, _rights: shuffle(rights) };
+    }
+    if (type === 'order') {
+      const items = (q.order_items || []).map((t, idx) => ({ t, idx }));
+      return { ...q, _disp: shuffle(items) };
+    }
+    if (type === 'tf' || type === 'fill') return { ...q };
     const order = shuffle(q.o.map((_, idx) => idx));
     return { ...q, o: order.map(idx => q.o[idx]), a: order.indexOf(q.a) };
   });
@@ -178,9 +203,10 @@ function hud() {
   sp.textContent = '🔥 ×' + streak;
   sp.classList.toggle('zero', streak < 2);
 }
+function qTime(q) { return (q.type === 'match' || q.type === 'order') ? 45 : (q.type === 'fill' ? 30 : QTIME); }
 function startTimer() {
   clearInterval(timerId);
-  timeLeft = QTIME;
+  timeLeft = qTime(qs[i]);
   const tp = document.getElementById('timerpill');
   tp.textContent = 'الوقت: ' + timeLeft.toLocaleString('ar-EG') + ' ثانية'; tp.classList.remove('low');
   timerId = setInterval(() => {
@@ -200,12 +226,47 @@ function render() {
   hud();
   const box = document.getElementById('opts');
   box.innerHTML = '';
-  q.o.forEach((t, idx) => {
-    const b = document.createElement('button');
-    b.className = 'opt'; b.textContent = t;
-    b.onclick = () => answer(idx, b);
-    box.appendChild(b);
-  });
+  if (q.type === 'match') {
+    (q.left_items || []).forEach((lt, k) => {
+      const row = document.createElement('div');
+      row.className = 'mrow';
+      row.innerHTML = '<div class="ml"></div>';
+      row.querySelector('.ml').textContent = lt;
+      const sel = document.createElement('select');
+      sel.innerHTML = '<option value="">اختر المقابل…</option>' + q._rights.map(r => '<option value="' + r.idx + '"></option>').join('');
+      [...sel.querySelectorAll('option')].slice(1).forEach((o, k2) => o.textContent = q._rights[k2].t);
+      sel.id = 'msel' + k;
+      row.appendChild(sel);
+      box.appendChild(row);
+    });
+    const cb = document.createElement('button');
+    cb.className = 'confirm'; cb.textContent = 'تأكيد التوصيل';
+    cb.onclick = () => settleMatch(false);
+    box.appendChild(cb);
+  } else if (q.type === 'fill') {
+    const row = document.createElement('div');
+    row.innerHTML = '<input type="text" id="fillIn" class="fillin" placeholder="اكتب الكلمة أو المعلومة الناقصة هنا" autocomplete="off">';
+    box.appendChild(row);
+    const cb = document.createElement('button');
+    cb.className = 'confirm'; cb.textContent = 'تأكيد الإجابة';
+    cb.onclick = () => settleFill(false);
+    box.appendChild(cb);
+    setTimeout(() => { const f = document.getElementById('fillIn'); if (f) f.focus(); }, 50);
+    row.querySelector('#fillIn').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') settleFill(false); });
+  } else if (q.type === 'order') {
+    renderOrderList(q, box);
+    const cb = document.createElement('button');
+    cb.className = 'confirm'; cb.textContent = 'تأكيد الترتيب';
+    cb.onclick = () => settleOrder(false);
+    box.appendChild(cb);
+  } else {
+    q.o.forEach((t, idx) => {
+      const b = document.createElement('button');
+      b.className = 'opt'; b.textContent = t;
+      b.onclick = () => answer(idx, b);
+      box.appendChild(b);
+    });
+  }
   const why = document.getElementById('why');
   why.className = 'why'; why.innerHTML = '';
   document.getElementById('nextbtn').className = 'next';
@@ -245,8 +306,107 @@ function settle(idx, btn, timedOut) {
   nb.textContent = (i + 1 < qs.length) ? 'السؤال التالي' : 'عرض النتيجة 🏁';
   nb.classList.add('show');
 }
+function renderOrderList(q, box) {
+  [...box.querySelectorAll('.orow')].forEach(x => x.remove());
+  const cb = box.querySelector('.confirm');
+  q._disp.forEach((it, pos) => {
+    const row = document.createElement('div');
+    row.className = 'orow';
+    row.innerHTML = '<div class="ot"></div><div class="obtns"><button type="button" title="أعلى">▲</button><button type="button" title="أسفل">▼</button></div>';
+    row.querySelector('.ot').textContent = (pos + 1) + '. ' + it.t;
+    const [up, dn] = row.querySelectorAll('button');
+    up.onclick = () => { if (pos > 0) { const t = q._disp[pos - 1]; q._disp[pos - 1] = q._disp[pos]; q._disp[pos] = t; renderOrderList(q, box); } };
+    dn.onclick = () => { if (pos < q._disp.length - 1) { const t = q._disp[pos + 1]; q._disp[pos + 1] = q._disp[pos]; q._disp[pos] = t; renderOrderList(q, box); } };
+    box.insertBefore(row, cb);
+  });
+}
+function finishTyped(ok, correctHtml) {
+  answered = true;
+  clearInterval(timerId);
+  stopBg();
+  const q = qs[i];
+  let head;
+  if (ok) {
+    correct++;
+    const gained = 100 + timeLeft * 5 + streak * 20;
+    points += gained;
+    streak++;
+    bestStreak = Math.max(bestStreak, streak);
+    document.getElementById('gain').textContent = '+' + gained;
+    head = '✅ إجابة صحيحة!';
+    if (streak >= 3) { head += ' سلسلة 🔥×' + streak; sStreak(); } else sCorrect();
+  } else {
+    streak = 0;
+    head = '❌ إجابة غير صحيحة.';
+    sWrong();
+  }
+  const why = document.getElementById('why');
+  why.innerHTML = '<b>' + head + '</b><br>' + correctHtml + (q.e ? '<br>' + q.e : '');
+  why.classList.add('show');
+  hud();
+  const nb = document.getElementById('nextbtn');
+  nb.textContent = (i + 1 < qs.length) ? 'السؤال التالي' : 'عرض النتيجة 🏁';
+  nb.classList.add('show');
+}
+function normTxt(s) {
+  return (s || '').trim()
+    .replace(/[\u064B-\u0652\u0670]/g, '')
+    .replace(/[\u0623\u0625\u0622]/g, '\u0627')
+    .replace(/\u0629/g, '\u0647')
+    .replace(/\u0649/g, '\u064A')
+    .replace(/\u0640/g, '')
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+function settleFill(timedOut) {
+  if (answered) return;
+  const q = qs[i];
+  const inp = document.getElementById('fillIn');
+  const expected = (q.o || [])[q.a] || '';
+  const ok = !timedOut && inp && normTxt(inp.value) !== '' && normTxt(inp.value) === normTxt(expected);
+  if (inp) { inp.disabled = true; inp.classList.add(ok ? 'good' : 'bad'); }
+  const cb = document.querySelector('#opts .confirm'); if (cb) cb.disabled = true;
+  const correctHtml = 'الإجابة الصحيحة: «' + expected + '»';
+  finishTyped(ok, correctHtml);
+}
+function settleMatch(timedOut) {
+  if (answered) return;
+  const q = qs[i];
+  let ok = !timedOut;
+  (q.left_items || []).forEach((lt, k) => {
+    const sel = document.getElementById('msel' + k);
+    const good = !timedOut && sel.value !== '' && parseInt(sel.value) === k;
+    sel.disabled = true;
+    sel.parentElement.classList.add(good ? 'good' : 'bad');
+    if (!good) ok = false;
+  });
+  const cb = document.querySelector('#opts .confirm'); if (cb) cb.disabled = true;
+  const correctHtml = 'التوصيل الصحيح:<br>' + (q.left_items || []).map((lt, k) => '• ' + lt + ' ← ' + (q.right_items || [])[k]).join('<br>');
+  finishTyped(ok, correctHtml);
+}
+function settleOrder(timedOut) {
+  if (answered) return;
+  const q = qs[i];
+  let ok = !timedOut;
+  q._disp.forEach((it, pos) => {
+    if (it.idx !== pos) ok = false;
+  });
+  [...document.querySelectorAll('#opts .orow')].forEach((row, pos) => {
+    row.classList.add(q._disp[pos].idx === pos ? 'good' : 'bad');
+    row.querySelectorAll('button').forEach(b => b.disabled = true);
+  });
+  const cb = document.querySelector('#opts .confirm'); if (cb) cb.disabled = true;
+  const correctHtml = 'الترتيب الصحيح:<br>' + (q.order_items || []).map((t, k) => (k + 1) + '. ' + t).join('<br>');
+  finishTyped(ok, correctHtml);
+}
 function answer(idx, btn) { settle(idx, btn, false); }
-function timeout() { settle(-1, null, true); }
+function timeout() {
+  const q = qs[i];
+  if (q && q.type === 'fill') return settleFill(true);
+  if (q && q.type === 'match') return settleMatch(true);
+  if (q && q.type === 'order') return settleOrder(true);
+  settle(-1, null, true);
+}
 async function next() {
   if (i + 1 < qs.length) { i++; render(); return; }
   document.getElementById('prog').style.width = '100%';
