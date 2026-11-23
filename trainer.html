@@ -48,6 +48,10 @@
   .spin { display:none; text-align:center; color:var(--green); font-weight:bold; margin-top:14px; }
   .spin.show { display:block; animation:p 1.2s infinite; }
   @keyframes p { 50% { opacity:.4; } }
+  .pair-line { display:flex; gap:8px; align-items:center; margin-top:8px; }
+  .pair-line input { flex:1; }
+  .pair-arrow { color:var(--green2); font-weight:bold; }
+  .ord-num { color:var(--green); font-weight:bold; min-width:22px; }
 </style>
 </head>
 <body>
@@ -270,18 +274,44 @@ async function generate() {
 function addQuestion(gen) {
   qCount++;
   const n = qCount;
+  const type = gen && gen.type ? gen.type : 'mcq';
   const div = document.createElement('div');
-  div.className = 'qrow'; div.id = 'q' + n;
-  const opts = gen ? gen.o : ['', '', '', ''];
-  const ansr = gen ? gen.a : 0;
-  div.innerHTML = '<h4>سؤال ' + n + (gen && gen.type ? '<span class="qtype">' + (TYPE_NAMES[gen.type] || '') + '</span>' : '') + '<button class="del" onclick="document.getElementById(\'q' + n + '\').remove()">مسح ✕</button></h4>'
-    + '<label>نص السؤال</label><input type="text" class="qq" placeholder="اكتب السؤال">'
-    + '<label>الاختيارات (حدد الصحيحة بعلامة الدائرة — اختيارين على الأقل)</label>'
-    + [0, 1, 2, 3].map(i => '<div class="opt-line"><input type="radio" name="c' + n + '" value="' + i + '"' + (i === ansr ? ' checked' : '') + '><input type="text" class="qo" placeholder="اختيار ' + (i + 1) + '"' + (opts[i] !== undefined ? '' : ' style="display:none"') + '></div>').join('')
-    + '<label>شرح الإجابة</label><input type="text" class="qe" placeholder="لماذا هذه هي الإجابة الصحيحة؟">';
+  div.className = 'qrow'; div.id = 'q' + n; div.dataset.type = type;
+  let inner = '<h4>سؤال ' + n + (gen && gen.type ? '<span class="qtype">' + (TYPE_NAMES[gen.type] || '') + '</span>' : '') + '<button class="del" onclick="document.getElementById(\'q' + n + '\').remove()">مسح ✕</button></h4>'
+    + '<label>نص السؤال</label><input type="text" class="qq" placeholder="اكتب السؤال">';
+  if (type === 'fill') {
+    inner += '<label>الإجابة الصحيحة (سيكتبها الطالب بنفسه)</label><input type="text" class="qf" placeholder="الكلمة أو المعلومة الناقصة">';
+  } else if (type === 'match') {
+    inner += '<label>أزواج التوصيل — كل عنصر ومقابله الصحيح</label>'
+      + [0, 1, 2, 3].map(k => '<div class="pair-line"><input type="text" class="ql" placeholder="عنصر ' + (k + 1) + '"><span class="pair-arrow">يُقابِل</span><input type="text" class="qr" placeholder="المقابل ' + (k + 1) + '"></div>').join('');
+  } else if (type === 'order') {
+    inner += '<label>الخطوات بالترتيب الصحيح (تُخلط تلقائيًا للطالب)</label>'
+      + [0, 1, 2, 3].map(k => '<div class="pair-line"><span class="ord-num">' + (k + 1) + '.</span><input type="text" class="qi" placeholder="الخطوة ' + (k + 1) + '"></div>').join('');
+  } else {
+    const opts0 = gen ? gen.o : ['', '', '', ''];
+    const ansr = gen ? gen.a : 0;
+    inner += '<label>الاختيارات (حدد الصحيحة بعلامة الدائرة — اختيارين على الأقل)</label>'
+      + [0, 1, 2, 3].map(i => '<div class="opt-line"><input type="radio" name="c' + n + '" value="' + i + '"' + (i === ansr ? ' checked' : '') + '><input type="text" class="qo" placeholder="اختيار ' + (i + 1) + '"' + (opts0[i] !== undefined ? '' : ' style="display:none"') + '></div>').join('');
+  }
+  inner += '<label>شرح الإجابة</label><input type="text" class="qe" placeholder="لماذا هذه هي الإجابة الصحيحة؟">';
+  div.innerHTML = inner;
   document.getElementById('qlist').appendChild(div);
   div.querySelector('.qq').value = gen ? gen.q : '';
-  [...div.querySelectorAll('.qo')].forEach((x, i) => x.value = opts[i] || '');
+  if (type === 'fill') {
+    const ans = gen && gen.o ? (gen.o[gen.a] || '') : '';
+    div.querySelector('.qf').value = ans;
+  } else if (type === 'match') {
+    const L = gen && gen.pairs ? gen.pairs.map(p => p.l) : [];
+    const R = gen && gen.pairs ? gen.pairs.map(p => p.r) : [];
+    [...div.querySelectorAll('.ql')].forEach((x, k) => x.value = L[k] || '');
+    [...div.querySelectorAll('.qr')].forEach((x, k) => x.value = R[k] || '');
+  } else if (type === 'order') {
+    const IT = gen && gen.items ? gen.items : [];
+    [...div.querySelectorAll('.qi')].forEach((x, k) => x.value = IT[k] || '');
+  } else {
+    const opts = gen ? gen.o : [];
+    [...div.querySelectorAll('.qo')].forEach((x, i) => x.value = opts[i] || '');
+  }
   div.querySelector('.qe').value = gen ? (gen.e || '') : '';
   div.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
@@ -293,15 +323,31 @@ async function saveQuiz() {
   for (let i = 1; i <= qCount; i++) {
     const box = document.getElementById('q' + i);
     if (!box) continue;
+    const type = box.dataset.type || 'mcq';
     const q = box.querySelector('.qq').value.trim();
-    const oAll = [...box.querySelectorAll('.qo')].map(x => x.value.trim());
-    let a = parseInt(box.querySelector('input[name=c' + i + ']:checked').value);
     const e = box.querySelector('.qe').value.trim();
-    const o = oAll.filter(x => x);
-    if (!q || o.length < 2) return showErr('buildErr', 'أكمل نص السؤال واختيارين على الأقل في سؤال من الأسئلة الظاهرة.');
-    if (!oAll[a]) { a = o.indexOf(oAll.find(x => x)) >= 0 ? 0 : 0; }
-    else { const kept = oAll[a]; a = o.indexOf(kept); }
-    rows.push({ ord: ++ord, q, o, a, e });
+    if (type === 'fill') {
+      const ans = box.querySelector('.qf').value.trim();
+      if (!q || !ans) return showErr('buildErr', 'أكمل نص سؤال «أكمل» وإجابته الصحيحة.');
+      rows.push({ ord: ++ord, q, o: [ans], a: 0, e, type: 'fill' });
+    } else if (type === 'match') {
+      const ls = [...box.querySelectorAll('.ql')].map(x => x.value.trim());
+      const rs = [...box.querySelectorAll('.qr')].map(x => x.value.trim());
+      if (!q || ls.some(x => !x) || rs.some(x => !x)) return showErr('buildErr', 'أكمل نص سؤال التوصيل وكل العناصر الأربعة ومقابلاتها.');
+      rows.push({ ord: ++ord, q, o: [], a: 0, e, type: 'match', left_items: ls, right_items: rs });
+    } else if (type === 'order') {
+      const its = [...box.querySelectorAll('.qi')].map(x => x.value.trim()).filter(x => x);
+      if (!q || its.length < 3) return showErr('buildErr', 'أكمل نص سؤال الترتيب وثلاث خطوات على الأقل.');
+      rows.push({ ord: ++ord, q, o: [], a: 0, e, type: 'order', order_items: its });
+    } else {
+      const oAll = [...box.querySelectorAll('.qo')].map(x => x.value.trim());
+      let a = parseInt(box.querySelector('input[name=c' + i + ']:checked').value);
+      const o = oAll.filter(x => x);
+      if (!q || o.length < 2) return showErr('buildErr', 'أكمل نص السؤال واختيارين على الأقل في سؤال من الأسئلة الظاهرة.');
+      if (!oAll[a]) { a = o.indexOf(oAll.find(x => x)) >= 0 ? 0 : 0; }
+      else { const kept = oAll[a]; a = o.indexOf(kept); }
+      rows.push({ ord: ++ord, q, o, a, e, type });
+    }
   }
   if (!rows.length) return showErr('buildErr', 'أضف سؤالًا واحدًا على الأقل.');
   document.getElementById('buildErr').style.display = 'none';
