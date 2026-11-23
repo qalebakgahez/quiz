@@ -286,7 +286,7 @@ function addQuestion(gen) {
       + [0, 1, 2, 3].map(k => '<div class="pair-line"><input type="text" class="ql" placeholder="عنصر ' + (k + 1) + '"><span class="pair-arrow">يُقابِل</span><input type="text" class="qr" placeholder="المقابل ' + (k + 1) + '"></div>').join('');
   } else if (type === 'order') {
     inner += '<label>الخطوات بالترتيب الصحيح (تُخلط تلقائيًا للطالب)</label>'
-      + [0, 1, 2, 3].map(k => '<div class="pair-line"><span class="ord-num">' + (k + 1) + '.</span><input type="text" class="qi" placeholder="الخطوة ' + (k + 1) + '"></div>').join('');
+      + [0, 1, 2, 3, 4, 5].map(k => '<div class="pair-line"><span class="ord-num">' + (k + 1) + '.</span><input type="text" class="qi" placeholder="الخطوة ' + (k + 1) + '"></div>').join('');
   } else {
     const opts0 = gen ? gen.o : ['', '', '', ''];
     const ansr = gen ? gen.a : 0;
